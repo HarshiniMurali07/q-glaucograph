@@ -1,0 +1,1005 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Q-GlaucoGraph</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+/* Layout concept: one fixed WebGL canvas holds a single continuous camera shot; caption dock sits lower-left, evidence panels right, labels are projected from 3D points. */
+:root{
+  --bg:#F3F6F7; --ink:#0F2340; --ink2:#3E5068; --mute:#7C8DA1; --line:rgba(15,35,64,.14);
+  --teal:#0E8F8A; --orange:#E8780F; --coral:#E5566B; --violet:#6C5CE7; --blue:#2F6FDE;
+  --glass:rgba(255,255,255,.78);
+  --serif:'Instrument Serif',Georgia,'Times New Roman',serif;
+  --sans:'Hanken Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --gl:max(16px,env(safe-area-inset-left,0px)); --gr:max(16px,env(safe-area-inset-right,0px));
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.5 var(--sans);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  overflow-x:hidden;-webkit-font-smoothing:antialiased}
+#gl{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0}
+#vig{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(circle at 56% 50%,transparent calc(var(--v,140%) - 22%),rgba(243,246,247,.97) var(--v,140%))}
+#spacer{width:1px;pointer-events:none}
+#tags{position:fixed;inset:0;z-index:3;pointer-events:none;overflow:hidden}
+.tag{position:absolute;left:0;top:0;opacity:0;will-change:transform,opacity;--c:var(--teal)}
+.tag i{position:absolute;left:-4px;top:-4px;width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 0 4px rgba(255,255,255,.7)}
+.tag u{position:absolute;top:0;left:4px;width:24px;height:1px;background:var(--c)}
+.tag b{position:absolute;left:28px;top:calc(-12px + var(--dy,0px));white-space:nowrap;font:600 12px/1 var(--sans);letter-spacing:.01em;
+  padding:6px 10px;background:var(--glass);border:1px solid var(--line);border-radius:999px;color:var(--ink);backdrop-filter:blur(6px)}
+.tag[data-dir="l"] u{left:auto;right:4px}.tag[data-dir="l"] b{left:auto;right:28px}
+.tag[data-dir="c"] u{display:none}.tag[data-dir="c"] b{left:0;transform:translateX(-50%);top:calc(6px + var(--dy,0px))}
+.tag.wide b{white-space:normal;width:226px;border-radius:12px;line-height:1.35;font-weight:500;padding:9px 12px;top:calc(-18px + var(--dy,0px))}
+.tag.wide b em{display:block;font:600 10.5px/1 var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--c);font-style:normal;margin-bottom:6px}
+#top{position:fixed;z-index:6;left:var(--gl);right:var(--gr);top:calc(12px + env(safe-area-inset-top,0px));display:flex;align-items:center;gap:16px;justify-content:space-between;pointer-events:none}
+.brand{font:400 24px/1 var(--serif);letter-spacing:.005em;pointer-events:auto}
+.brand span{color:var(--orange)}
+#nav{display:flex;gap:6px;pointer-events:auto;overflow-x:auto;max-width:100%;scrollbar-width:none}
+#nav::-webkit-scrollbar{display:none}
+#nav button{all:unset;cursor:pointer;font:600 12px/1 var(--sans);padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--glass);color:var(--ink2);white-space:nowrap;display:flex;gap:7px;align-items:center;backdrop-filter:blur(6px)}
+#nav button i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+#nav button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+#nav button:focus-visible,#foot button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+#cap{position:fixed;z-index:5;left:var(--gl);bottom:calc(68px + env(safe-area-inset-bottom,0px));width:min(470px,42vw);transition:opacity .22s,transform .22s}
+#cap.out{opacity:0;transform:translateY(8px)}
+#cap::before{content:"";position:absolute;z-index:-1;inset:-40px -70px -30px -50px;background:radial-gradient(closest-side at 42% 55%,rgba(243,246,247,.93) 45%,rgba(243,246,247,0));pointer-events:none}
+.kick{display:flex;align-items:center;gap:9px;font:600 11px/1 var(--sans);letter-spacing:.15em;text-transform:uppercase;color:var(--ink2);margin-bottom:14px}
+.kick i{width:9px;height:9px;border-radius:50%;background:var(--c,var(--teal))}
+#cap h1{font:400 clamp(30px,4.3vw,60px)/1.0 var(--serif);letter-spacing:-.012em;margin:0 0 14px;text-wrap:balance}
+#cap h1 em{color:var(--c,var(--teal));font-style:italic}
+#cap .body{margin:0;color:var(--ink2);font-size:16px;line-height:1.5;max-width:44ch}
+.terms{display:flex;flex-direction:column;gap:8px;margin-top:16px;max-width:46ch}
+.terms div{font-size:13.5px;line-height:1.45;color:var(--ink2);padding-top:8px;border-top:1px solid var(--line)}
+.terms strong{color:var(--ink);font-weight:600}
+#panels{position:fixed;z-index:5;right:var(--gr);top:50%;transform:translateY(-46%);width:min(372px,31vw);pointer-events:none}
+.panel{position:absolute;right:0;top:50%;width:100%;transform:translateY(-50%) translateX(14px);opacity:0;pointer-events:none;transition:opacity .3s,transform .3s;
+  background:var(--glass);border:1px solid var(--line);border-radius:16px;padding:18px;backdrop-filter:blur(12px);box-shadow:0 10px 34px rgba(15,35,64,.08)}
+.panel.on{opacity:1;transform:translateY(-50%);pointer-events:auto}
+.panel h3{margin:0 0 12px;font:600 11px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--ink2)}
+.panel p{margin:0;font-size:13.5px;color:var(--ink2);line-height:1.5}
+.panel p+p{margin-top:10px}
+#p-bio ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+#p-bio li{padding:9px 10px;border-radius:10px;color:var(--mute);transition:all .25s}
+#p-bio li b{display:block;font:600 14px/1.2 var(--sans)}#p-bio li span{font-size:12.5px;line-height:1.4;display:block;margin-top:2px}
+#p-bio li.on{background:rgba(14,143,138,.1);color:var(--ink)}
+#p-bio li.on span{color:var(--ink2)}
+.bars{display:flex;gap:12px;align-items:flex-end;height:150px;margin:6px 0 10px}
+.bars div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:7px;height:100%;font-size:12px;font-weight:600;color:var(--ink2)}
+.bars i{display:block;width:100%;border-radius:8px 8px 3px 3px;background:rgba(232,120,15,.28);height:2%;transition:height .5s cubic-bezier(.2,.8,.2,1)}
+.bars div.win i{background:var(--orange)}
+.pipe{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0}
+.chip{font:600 12px/1 var(--sans);padding:8px 10px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink)}
+.chip.t{border-color:var(--teal);color:var(--teal)}.chip.q{border-color:var(--orange);color:var(--orange);background:rgba(232,120,15,.08)}.chip.c{color:var(--mute);border-style:dashed}
+.arrow{color:var(--mute);font-size:13px}
+.note{margin-top:12px!important;padding-top:12px;border-top:1px solid var(--line);color:var(--ink)!important;font-weight:500}
+.hm{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hm div{font-size:12.5px;color:var(--ink2);line-height:1.4}.hm strong{display:block;color:var(--ink);font-size:13px;margin-bottom:8px}
+.hmcirc{height:98px;border-radius:50%;aspect-ratio:1;background:radial-gradient(circle at 40% 45%,#E58A3F,#C45A22 70%,#8E3A1A);position:relative;margin-bottom:8px;box-shadow:inset 0 0 18px rgba(60,15,5,.5)}
+.hmcirc::after{content:"";position:absolute;left:42%;top:18%;width:42%;height:42%;border-radius:50%;background:radial-gradient(circle,rgba(255,235,60,.95),rgba(255,70,50,.5) 55%,transparent 72%)}
+.chain{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;height:98px;margin-bottom:8px}
+.chain span{width:100%;height:14px;border-radius:5px;background:rgba(229,86,107,.25);position:relative}
+.chain span:nth-child(1){width:55%}.chain span:nth-child(2){width:70%}.chain span:nth-child(3){width:85%}.chain span:nth-child(4){width:100%;background:var(--coral)}
+.cfwrap label{display:flex;justify-content:space-between;font:600 12px/1 var(--sans);color:var(--ink2);margin:14px 0 8px}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:99px;background:linear-gradient(90deg,var(--teal),var(--coral));outline:none;margin:0}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:#fff;border:3px solid var(--ink);cursor:grab;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid var(--ink);cursor:grab}
+input[type=range]:focus-visible{outline:2px solid var(--blue);outline-offset:6px}
+#cfline{font:400 20px/1.2 var(--serif);color:var(--ink);margin-top:14px;min-height:48px}
+#cfline em{color:var(--coral)}
+.claim{font:400 clamp(20px,2.1vw,28px)/1.22 var(--serif);color:var(--ink);margin:0}
+.claim em{color:var(--orange)}
+#p-claim{width:calc(100% + 40px)}
+.mini{font-size:12.5px!important;color:var(--mute)!important}
+.obj{list-style:none;margin:10px 0 14px;padding:0;display:grid;gap:7px}
+.obj li{font-size:13px;line-height:1.4;color:var(--ink2);padding-left:18px;position:relative}
+.obj li::before{content:"";position:absolute;left:0;top:7px;width:8px;height:8px;border-radius:50%;background:var(--c)}
+.who{font:400 22px/1.15 var(--serif);color:var(--ink);margin:12px 0 2px}
+#foot{position:fixed;z-index:6;left:var(--gl);right:var(--gr);bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:14px}
+#rail{flex:1;height:3px;border-radius:9px;background:var(--line);position:relative;overflow:hidden}
+#rail i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--ink);border-radius:9px}
+#count{font:600 12px/1 var(--sans);color:var(--ink2);min-width:74px;text-align:right;font-variant-numeric:tabular-nums}
+#foot button{all:unset;cursor:pointer;font:600 12px/1 var(--sans);padding:8px 11px;border-radius:999px;border:1px solid var(--line);background:var(--glass);color:var(--ink2);backdrop-filter:blur(6px)}
+#foot button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+#say{position:fixed;z-index:7;left:var(--gl);right:var(--gr);bottom:calc(56px + env(safe-area-inset-bottom,0px));max-width:760px;margin:0 auto;padding:14px 18px;border-radius:14px;
+  background:var(--ink);color:#fff;font-size:15px;line-height:1.5;opacity:0;pointer-events:none;transform:translateY(8px);transition:all .25s}
+#say.on{opacity:1;transform:none}#say small{display:block;font:600 10.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#9FB2C9;margin-bottom:8px}
+.hint{font-size:12px;color:var(--mute);white-space:nowrap}
+@media (max-width:860px){
+  #cap{width:auto;right:var(--gr);bottom:calc(60px + env(safe-area-inset-bottom,0px))}
+  #cap h1{font-size:clamp(26px,8vw,38px)}#cap .body{font-size:14.5px}
+  .terms div{font-size:12.5px}
+  #panels{top:calc(66px + env(safe-area-inset-top,0px));transform:none;left:var(--gl);right:var(--gr);width:auto}
+  .panel{top:0;transform:translateY(-8px)}.panel.on{transform:none}
+  #p-claim{width:100%}
+  .bars{height:80px}.hmcirc,.chain{height:64px}
+  .hint,#count{display:none}
+  #top{flex-direction:column;align-items:flex-start;gap:8px}
+  .tag.wide b{width:160px;font-size:11px}
+}
+@media (max-height:640px) and (min-width:861px){.terms{display:none}#cap h1{font-size:clamp(28px,3.6vw,44px)}}
+@media (prefers-reduced-motion:reduce){#cap,.panel,#say{transition:none}}
+</style>
+
+<canvas id="gl" aria-label="Animated scene explaining the Q-GlaucoGraph pipeline"></canvas>
+<div id="vig"></div>
+<div id="tags"></div>
+<header id="top">
+  <div class="brand">Q-Glauco<span>Graph</span></div>
+  <nav id="nav" aria-label="Scenes"></nav>
+</header>
+<section id="cap" aria-live="polite">
+  <div class="kick"><i></i><span></span></div>
+  <h1></h1>
+  <p class="body"></p>
+  <div class="terms"></div>
+</section>
+<div id="panels">
+  <aside class="panel" id="p-bio">
+    <h3>Vascular biomarkers</h3>
+    <ul>
+      <li data-k="cal"><b>Calibre</b><span>How wide a vessel is.</span></li>
+      <li data-k="avr"><b>Artery–vein ratio</b><span>How the arteries' width compares with the veins'.</span></li>
+      <li data-k="tor"><b>Tortuosity</b><span>How twisted a vessel is.</span></li>
+      <li data-k="bra"><b>Branching</b><span>How often, and where, vessels split.</span></li>
+      <li data-k="per"><b>Peripapillary vessel density</b><span>How much of the ring around the optic disc is filled with vessels.</span></li>
+    </ul>
+  </aside>
+  <aside class="panel" id="p-read">
+    <h3>What the circuit reports</h3>
+    <div class="bars">
+      <div><i data-p="0.05"></i>Normal</div><div><i data-p="0.15"></i>Early</div><div class="win"><i data-p="0.68"></i>Moderate</div><div><i data-p="0.12"></i>Advanced</div>
+    </div>
+    <p>Reading the circuit forces one answer. The stages follow the clinical disc damage scale.</p>
+  </aside>
+  <aside class="panel" id="p-comp">
+    <h3>A fair comparison</h3>
+    <div class="pipe"><span class="chip t">Graph network</span><span class="arrow">→</span><span class="chip q">Quantum layer</span><span class="arrow">→</span><span class="chip">Stage</span></div>
+    <div class="pipe"><span class="chip t">Graph network</span><span class="arrow">→</span><span class="chip c">Classical layer, same parameters</span><span class="arrow">→</span><span class="chip">Stage</span></div>
+    <p>Same data, same split, same number of trainable parameters. Runs on real quantum hardware are part of the study.</p>
+    <p class="note">Quantum advantage in accuracy is not proven. This research tests it. It does not assume it.</p>
+  </aside>
+  <aside class="panel" id="p-hm">
+    <h3>Two kinds of explanation</h3>
+    <div class="hm">
+      <div><div class="hmcirc"></div><strong>Heatmap</strong>Shows where the model looked.</div>
+      <div><div class="chain"><span></span><span></span><span></span><span></span></div><strong>Pathway</strong>Shows what led to what.</div>
+    </div>
+  </aside>
+  <aside class="panel" id="p-cf">
+    <h3>Counterfactual</h3>
+    <p>Move the slider to set the inferior rim, then watch the chain.</p>
+    <div class="cfwrap"><label for="cf"><span>Rim intact</span><span>Rim damaged</span></label>
+    <input type="range" id="cf" min="0" max="100" value="100" aria-label="Inferior rim damage"></div>
+    <div id="cfline"></div>
+  </aside>
+  <aside class="panel" id="p-claim">
+    <h3>The claim</h3>
+    <p class="claim">To the best of my knowledge, this will be the first <em>hybrid quantum graph neural network that learns directly from the retinal vascular graph</em>, applied to glaucoma severity staging and validated against parameter-matched classical models, including runs on real quantum hardware.</p>
+  </aside>
+  <aside class="panel" id="p-prior">
+    <h3>Positioned honestly</h3>
+    <p><strong>Closest prior work:</strong> CQH-MPN, a classical–quantum hybrid prototype network for early glaucoma diagnosis (IEEE JBHI, 2025).</p>
+    <p>The claim here is limited to the combination shown: a quantum graph network learning from the retinal vessel graph, for severity staging.</p>
+    <p class="note">Results will be reported on accuracy, parameter efficiency, robustness and communication cost, so the work stays valuable even if the quantum layer gives no accuracy gain.</p>
+  </aside>
+  <aside class="panel" id="p-close">
+    <h3>Four objectives</h3>
+    <ul class="obj">
+      <li style="--c:var(--teal)">Retinal graph and vascular biomarkers</li>
+      <li style="--c:var(--orange)">Hybrid quantum graph learning for severity staging</li>
+      <li style="--c:var(--coral)">Causal pathway with counterfactual explanations</li>
+      <li style="--c:var(--violet)">Structure-to-function prediction with uncertainty, trained across hospitals</li>
+    </ul>
+    <div class="who">Harshini Murali</div>
+    <p>Supervisor: Dr. Suchithra M<br>Department of Computing Technologies, School of Computing<br>SRM Institute of Science and Technology, Kattankulathur</p>
+  </aside>
+</div>
+<div id="say" role="note"><small>Speaker note</small><span></span></div>
+<footer id="foot">
+  <div id="rail"><i></i></div>
+  <span class="hint">← → step · scroll · P notes</span>
+  <span id="count"></span>
+  <button id="pbtn" type="button" aria-pressed="false">Notes</button>
+</footer>
+<div id="spacer"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+'use strict';
+/* ---------- utils ---------- */
+const $=s=>document.querySelector(s), $$=s=>Array.prototype.slice.call(document.querySelectorAll(s));
+const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+const sm=x=>x*x*(3-2*x);
+const ss=(a,b,t)=>sm(clamp((t-a)/(b-a),0,1));
+const win=(a,b,c,d,t)=>ss(a,b,t)*(1-ss(c,d,t));
+const lerp=(a,b,t)=>a+(b-a)*t;
+function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function angLerp(a,b,t){let d=((b-a+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;return a+d*t}
+const REDUCE=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+const COL={teal:0x0E8F8A,tealL:0x28C9BB,navy:0x0F2340,orange:0xE8780F,coral:0xE5566B,violet:0x6C5CE7,bg:0xF3F6F7};
+
+/* ---------- story ---------- */
+const SCENES=[{n:'Problem',b:0,c:'#0F2340'},{n:'Graph',b:2,c:'#0E8F8A'},{n:'Quantum',b:10,c:'#E8780F'},{n:'Cause',b:18,c:'#E5566B'},{n:'Novelty',b:21,c:'#0F2340'}];
+const T_='#0E8F8A',O_='#E8780F',C_='#E5566B',N_='#0F2340';
+const BEATS=[
+{sc:0,c:N_,k:'The problem',t:'Glaucoma steals sight <em>silently.</em>',b:'Side vision fades first, so most people notice nothing until the damage is done.',
+ say:'Glaucoma damages the optic nerve gradually. Side vision goes first, so patients usually notice late.'},
+{sc:0,c:N_,k:'The question',t:'Can one photograph give a stage, a reason and a prediction?',b:'In India many people with glaucoma are never diagnosed. Visual field testing is slow and is not available in primary care. A retinal photograph is quick to take.',
+ say:'My question: from a single retinal photograph, can we get the stage, an explanation and a prediction of functional loss? I answer it in four objectives.'},
+{sc:1,c:T_,k:'Image to graph',t:'A foundation model <em>reads</em> the image',b:'It looks at the whole photograph first, the way an experienced reader scans a retina.',
+ terms:[['Foundation model','A network already trained on a very large set of retinal images, then lightly adapted to glaucoma (LoRA).']],
+ say:'Step one is deep learning. A retinal foundation model, RETFound, adapted with a light LoRA update, reads the fundus image.'},
+{sc:1,c:T_,k:'Image to graph',t:'Disc and cup are <em>outlined</em>',b:'The optic disc is where the nerve leaves the eye. In glaucoma the pale cup at its centre grows and the rim around it thins.',
+ say:'Disc and cup are segmented. Cup enlargement and thinning of the inferior rim are the classic structural signs.'},
+{sc:1,c:T_,k:'Image to graph',t:'Arteries and veins, traced <em>separately</em>',b:'They are separated because each carries its own information about the eye’s blood supply.',
+ say:'Arteries and veins are segmented separately, because the vascular biomarkers differ between them.'},
+{sc:1,c:T_,k:'Objective 1',t:'Junctions become <em>nodes.</em> Vessels become links.',b:'The retina is now a graph that keeps the vessels’ real layout.',
+ terms:[['Graph','A map of points (nodes) joined by lines (links).']],
+ say:'This is objective 1. The image becomes a retinal graph: junctions are nodes and vessel segments are links.'},
+{sc:1,c:T_,k:'Objective 1',t:'Calibre and the <em>artery–vein ratio</em>',b:'How wide each vessel is, and how arteries compare with veins.',panel:'bio',
+ say:'Calibre and the artery–vein ratio are the first two biomarkers.'},
+{sc:1,c:T_,k:'Objective 1',t:'<em>Tortuosity</em>',b:'The most twisted vessel segments are highlighted.',panel:'bio',
+ say:'Tortuosity: the most twisted segments light up.'},
+{sc:1,c:T_,k:'Objective 1',t:'<em>Branching</em>',b:'Every point where a vessel splits glows.',panel:'bio',
+ say:'Branching pattern: the junction nodes are the highlighted points.'},
+{sc:1,c:T_,k:'Objective 1',t:'Vessel density <em>around the disc</em>',b:'The ring around the optic disc is where vessel change and nerve damage meet.',panel:'bio',
+ say:'Peripapillary vessel density: the ring around the disc, where vascular and structural change meet.'},
+{sc:2,c:T_,k:'Objective 2 · Hybrid quantum graph network',t:'The graph <em>lifts</em> off the image',b:'From here the retina is only its graph. The photograph underneath is frozen: the foundation model and segmentation were adapted beforehand.',
+ say:'Objective 2 starts here. The foundation model and segmentation are frozen. Only the graph network and the quantum layer learn.'},
+{sc:2,c:T_,k:'Objective 2 · Hybrid quantum graph network',t:'Neighbours <em>talk</em> to each other',b:'Every node passes what it knows to the vessels it touches, round after round.',
+ terms:[['Graph network','A network that learns from how the points in a graph connect.']],
+ say:'A graph neural network passes messages between neighbouring nodes, round after round.'},
+{sc:2,c:O_,k:'Objective 2 · Hybrid quantum graph network',t:'Compressed to a <em>handful of numbers</em>',b:'Thousands of details collapse into a few numbers, each tied to one region of the vessel tree. That is small enough for today’s quantum hardware.',
+ say:'The graph is compressed into a handful of numbers. This step is what makes the quantum layer feasible on current hardware.'},
+{sc:2,c:O_,k:'Objective 2 · Hybrid quantum graph network',t:'Each number sets <em>one qubit</em>',b:'A qubit is a dial that can rest anywhere between 0 and 1, like the spinning coin. The number decides how far the dial turns.',
+ terms:[['Qubit','The quantum version of a bit. It can sit between 0 and 1 until it is measured.']],
+ say:'Each number sets the rotation of one qubit. Think of the spinning coin: the number decides the angle.'},
+{sc:2,c:O_,k:'Objective 2 · Hybrid quantum graph network',t:'The circuit has <em>the retina’s shape</em>',b:'Qubits are linked wherever their vessel regions touch, so the circuit copies the retina’s own connections. Only two layers of trainable gates keep training stable.',
+ terms:[['Entanglement','Linked qubits share one outcome. Here the links follow the vessel graph.']],
+ say:'This is the novelty in one picture: the circuit’s connections follow the vessel graph. It is a shallow circuit, which trains more stably.'},
+{sc:2,c:O_,k:'Objective 2 · Hybrid quantum graph network',t:'Measuring settles on a <em>stage</em>',b:'Reading the circuit forces one answer: normal, early, moderate or advanced.',panel:'read',
+ say:'Measurement collapses the circuit to a stage: normal, early, moderate or advanced, following the clinical disc damage scale.'},
+{sc:2,c:O_,k:'Objective 2 · Hybrid quantum graph network',t:'Learning flows <em>backwards</em>',b:'The error travels back through the quantum layer and into the graph network, so the two learn as one system.',
+ say:'Training is joint: the error flows back through the quantum layer into the graph network. The segmentation stage stays frozen.'},
+{sc:2,c:O_,k:'Objective 2 · Hybrid quantum graph network',t:'A <em>fair</em> test',b:'Every quantum model is compared with a classical model that has the same number of trainable parameters.',panel:'comp',
+ say:'The comparison is against classical models with matched parameters. I report accuracy, parameter efficiency, robustness and communication cost, so the work holds value even if there is no accuracy gain.'},
+{sc:3,c:C_,k:'Objective 3 · Causal explanation',t:'A heatmap shows where. A pathway shows <em>why.</em>',b:'Most explanations highlight the region a model looked at. This one traces cause and effect from the vessels to the stage.',panel:'hm',
+ say:'Objective 3. Heatmaps say where the model looked. A causal pathway says why.'},
+{sc:3,c:C_,k:'Objective 3 · Causal explanation',t:'Four steps, <em>in order</em>',b:'Vascular changes lead to structural damage, then functional loss, then the severity stage. Each step triggers the next.',
+ say:'The pathway: vascular changes, then structural damage, then functional loss, then severity.'},
+{sc:3,c:C_,k:'Objective 3 · Causal explanation',t:'What if the rim <em>were intact?</em>',b:'Drag the slider. Setting the inferior rim to intact breaks the chain, so the later steps stay standing and the stage changes.',panel:'cf',
+ terms:[['Counterfactual','The smallest change that would alter the diagnosis.']],
+ say:'Counterfactual: if the inferior rim were intact, the stage would be Early. This is the kind of explanation a clinician can act on.'},
+{sc:4,c:N_,k:'What is new',t:'Four fields. <em>Four gaps.</em>',b:'Each field has taken one part of the problem. None has taken the whole of it.',
+ say:'Now the novelty. These are the four gaps I found in the literature.'},
+{sc:4,c:N_,k:'What is new',t:'Each gap becomes <em>an answer</em>',b:'Every lens flips to show what this research puts in its place.',
+ say:'Each gap maps onto one contribution.'},
+{sc:4,c:O_,k:'What is new',t:'Where the four <em>meet</em>',b:'The lenses line up and their light lands in one place.',panel:'claim',
+ say:'To the best of my knowledge, no earlier work combines all four. Read the claim exactly as written.'},
+{sc:4,c:N_,k:'What is new',t:'Positioned <em>honestly</em>',b:'One close paper exists. The claim stays inside the combination shown.',panel:'prior',
+ say:'One close paper exists: CQH-MPN. My claim is limited to the combination shown. I would value your guidance on the wording.'},
+{sc:4,c:N_,k:'Q-GlaucoGraph',t:'Explainable glaucoma staging from <em>one photograph</em>',b:'A retinal graph, a hybrid quantum layer, a causal pathway and a prediction of vision loss, trained across hospitals without sharing patient images.',panel:'close',
+ say:'That is the concept. Next I would add the structure-to-function prediction and the federated deployment scenes.'}
+];
+const N=BEATS.length;
+/* camera keyframes: px,py,pz, tx,ty,tz, fov */
+const CAMS=[
+[0,0,2.62, 0,0,0, 38],[0.2,0.02,1.8, 0.3,0.02,0, 38],[0,0,2.95, 0,0,0, 38],[0.34,0.0,1.0, 0.34,0.03,0, 36],
+[0,0,2.8, -0.05,0,0, 38],[0.12,-0.5,2.45, 0,0,0.05, 38],[-0.05,-0.35,2.5, 0,0,0.05, 38],[-0.35,-0.25,2.05, -0.15,0,0.05, 38],
+[0.25,-0.3,2.1, 0.15,0.05,0.05, 38],[0.34,-0.12,1.6, 0.35,0.03,0.05, 38],
+[0,-1.55,2.5, 0,0,0.45, 38],[0.25,-1.35,2.4, 0,0,0.6, 38],[0,-1.0,2.8, 0,0,0.75, 38],[0,-0.8,3.2, 0,0,0.85, 38],
+[0,-0.25,2.95, 0,0,0.85, 38],[0,-0.55,2.65, 0,0,0.85, 38],[0,-1.2,2.55, 0,0,0.5, 38],[0,-0.7,3.5, 0,0,0.4, 38],
+[10.6,0.35,7.4, 10.5,-0.7,0, 34],[10.3,0.45,7.0, 10.1,-0.65,0, 34],[10.9,0.4,7.0, 10.9,-0.65,0, 34],
+[22.0,0.0,7.6, 21.7,0,0, 36],[22.4,0.25,7.4, 21.9,0,0, 36],[24.4,0.55,4.7, 22.0,0,0.4, 34],[24.0,0.5,5.0, 22.2,0,0.5, 34],[22.0,0.2,8.0, 22.0,0,0, 36]
+];
+
+/* ---------- retina + vessels ---------- */
+const DISC={x:0.36,y:0.03}, DISC_R=0.098, CUP_R=0.066, CUP_OFF={x:-0.004,y:-0.014}, MAC={x:-0.31,y:-0.03};
+const bowl=(x,y)=>0.15*(x*x+y*y);
+const MAINS_A=[
+ [[0.37,0.07],[0.32,0.25],[0.12,0.43],[-0.18,0.47],[-0.50,0.37],[-0.76,0.18],[-0.88,0.04]],
+ [[0.37,-0.01],[0.33,-0.22],[0.14,-0.42],[-0.18,-0.47],[-0.50,-0.39],[-0.76,-0.22],[-0.88,-0.08]],
+ [[0.42,0.06],[0.56,0.20],[0.68,0.33],[0.77,0.44]],
+ [[0.42,0.0],[0.57,-0.18],[0.69,-0.33],[0.77,-0.44]]];
+const MAINS_V=[
+ [[0.35,0.05],[0.28,0.23],[0.08,0.41],[-0.22,0.45],[-0.54,0.34],[-0.80,0.14],[-0.90,0.0]],
+ [[0.35,0.01],[0.30,-0.24],[0.10,-0.44],[-0.22,-0.45],[-0.54,-0.36],[-0.80,-0.19],[-0.90,-0.04]],
+ [[0.41,0.04],[0.55,0.16],[0.66,0.29],[0.75,0.41]],
+ [[0.41,0.02],[0.55,-0.16],[0.67,-0.30],[0.75,-0.42]]];
+
+function buildTree(kind,mains,seed){
+  const R=rng(seed), V=[], W0=kind==='A'?0.0062:0.0082;
+  function grow(p,h,L){
+    const pts=[p.clone()],step=0.016;let tr=0;const steps=Math.floor(L/step);
+    for(let s=0;s<steps;s++){
+      tr+=(R()-.5)*0.12;tr=clamp(tr,-0.1,0.1);h+=tr;
+      const rr=Math.hypot(p.x,p.y);if(rr>0.8)h=angLerp(h,Math.atan2(-p.y,-p.x),0.09);
+      const dm=Math.hypot(p.x-MAC.x,p.y-MAC.y);if(dm<0.16)h=angLerp(h,Math.atan2(p.y-MAC.y,p.x-MAC.x),0.16);
+      const dd=Math.hypot(p.x-DISC.x,p.y-DISC.y);if(dd<0.13)h=angLerp(h,Math.atan2(p.y-DISC.y,p.x-DISC.x),0.2);
+      p=new THREE.Vector2(p.x+Math.cos(h)*step,p.y+Math.sin(h)*step);
+      if(Math.hypot(p.x,p.y)>0.93)break;pts.push(p.clone());
+    }
+    return pts;
+  }
+  function spawn(vi){
+    const v=V[vi];if(v.depth>=3)return;const n=v.pts.length;
+    const pc=v.depth===0?1:v.depth===1?0.55:0.28;
+    let j=6+Math.floor(R()*5),side=R()<.5?1:-1;
+    while(j<n-6){
+      if(R()<pc){
+        const a=v.pts[j-1],b=v.pts[j+1],tang=Math.atan2(b.y-a.y,b.x-a.x);
+        const ang=tang+side*(0.55+R()*0.55);
+        const L=(0.15+R()*0.28)*(v.depth===0?1:0.72);
+        const pts=grow(v.pts[j].clone(),ang,L);
+        if(pts.length>6){V.push({kind,pts,w:v.w*(0.62+R()*0.1),depth:v.depth+1,parent:{v:vi,i:j},br:[]});v.br.push(j);spawn(V.length-1);}
+      }
+      side*=-1;j+=v.depth===0?(8+Math.floor(R()*7)):(6+Math.floor(R()*6));
+    }
+  }
+  mains.forEach(ctrl=>{
+    const curve=new THREE.CatmullRomCurve3(ctrl.map(c=>new THREE.Vector3(c[0]+(R()-.5)*0.02,c[1]+(R()-.5)*0.02,0)));
+    const sp=curve.getSpacedPoints(Math.floor(curve.getLength()/0.016));const ph=R()*6,am=0.004+R()*0.004;
+    const pts=sp.map((q,i)=>{const t=i/sp.length;return new THREE.Vector2(q.x+Math.sin(ph+i*0.5)*am*0.5,q.y+Math.cos(ph+i*0.43)*am)});
+    V.push({kind,pts,w:W0,depth:0,parent:null,br:[]});spawn(V.length-1);
+  });
+  return V;
+}
+const VA=buildTree('A',MAINS_A,11), VV=buildTree('V',MAINS_V,29);
+const VESSELS=VA.concat(VV);
+VESSELS.forEach((v,i)=>{ if(v.parent&&v.kind==='V') v.parent.v+=VA.length; });
+
+/* fundus texture */
+function makeFundus(S){
+  const cv=document.createElement('canvas');cv.width=cv.height=S;const g=cv.getContext('2d');
+  const R=rng(5),H=S/2,px=x=>(x*0.5+0.5)*S,py=y=>(0.5-y*0.5)*S,u=v=>v*H;
+  g.save();g.beginPath();g.arc(H,H,H,0,6.2832);g.clip();
+  let gr=g.createRadialGradient(px(0.1),py(0.05),0,H,H,H);
+  gr.addColorStop(0,'#E88B40');gr.addColorStop(.55,'#D4692C');gr.addColorStop(1,'#93401C');g.fillStyle=gr;g.fillRect(0,0,S,S);
+  const cols=['rgba(246,168,92,','rgba(168,72,30,','rgba(255,196,120,'];
+  for(let i=0;i<1900;i++){const a=R()*6.28,r=Math.sqrt(R())*H,x=H+Math.cos(a)*r,y=H+Math.sin(a)*r,rad=8+R()*34;
+    const c=cols[i%3]+(0.028+R()*0.035)+')';g.fillStyle=c;g.beginPath();g.arc(x,y,rad,0,6.2832);g.fill();}
+  // macula
+  gr=g.createRadialGradient(px(MAC.x),py(MAC.y),0,px(MAC.x),py(MAC.y),u(0.12));
+  gr.addColorStop(0,'rgba(92,26,8,.62)');gr.addColorStop(.5,'rgba(110,34,12,.3)');gr.addColorStop(1,'rgba(110,34,12,0)');g.fillStyle=gr;g.fillRect(0,0,S,S);
+  // vessels (veins first)
+  function draw(v,stroke,hi,wm){
+    const n=v.pts.length;
+    for(let k=0;k<n-1;k++){const a=v.pts[k],b=v.pts[k+1],t=k/n,w=u(v.w)*wm*(1-0.38*t);
+      g.lineCap='round';g.strokeStyle=stroke;g.lineWidth=w*1.18;g.beginPath();g.moveTo(px(a.x),py(a.y));g.lineTo(px(b.x),py(b.y));g.stroke();
+      if(hi&&v.depth<2){g.strokeStyle=hi;g.lineWidth=w*0.34;g.beginPath();g.moveTo(px(a.x),py(a.y));g.lineTo(px(b.x),py(b.y));g.stroke();}}
+  }
+  g.globalAlpha=.94;
+  VESSELS.filter(v=>v.kind==='V').forEach(v=>draw(v,'#7C211A','#A4382A',1));
+  VESSELS.filter(v=>v.kind==='A').forEach(v=>draw(v,'#C23A22','#F08A62',1));
+  g.globalAlpha=1;
+  // disc, cup
+  const dx=px(DISC.x),dy=py(DISC.y);
+  gr=g.createRadialGradient(dx,dy,0,dx,dy,u(DISC_R)*1.25);gr.addColorStop(0,'#FFF2CD');gr.addColorStop(.7,'#F6CE86');gr.addColorStop(1,'rgba(240,170,90,0)');
+  g.fillStyle=gr;g.beginPath();g.arc(dx,dy,u(DISC_R)*1.25,0,6.2832);g.fill();
+  g.strokeStyle='rgba(180,110,50,.55)';g.lineWidth=u(0.004);g.beginPath();g.arc(dx,dy,u(DISC_R),0,6.2832);g.stroke();
+  const cx=px(DISC.x+CUP_OFF.x),cy=py(DISC.y+CUP_OFF.y);
+  gr=g.createRadialGradient(cx,cy,0,cx,cy,u(CUP_R));gr.addColorStop(0,'#FFFDF2');gr.addColorStop(.8,'#FFF6D9');gr.addColorStop(1,'#F2D9A0');
+  g.fillStyle=gr;g.beginPath();g.arc(cx,cy,u(CUP_R),0,6.2832);g.fill();
+  // vessels crossing the disc
+  g.globalAlpha=.9;VESSELS.filter(v=>v.depth===0).forEach(v=>{const s={pts:v.pts.slice(0,9),w:v.w,depth:1};draw(s,v.kind==='A'?'#C23A22':'#7C211A',null,1)});g.globalAlpha=1;
+  // fovea
+  g.fillStyle='rgba(70,18,6,.55)';g.beginPath();g.arc(px(MAC.x),py(MAC.y),u(0.012),0,6.2832);g.fill();
+  // grain + edge vignette
+  for(let i=0;i<26000;i++){g.fillStyle='rgba('+(R()<.5?'255,220,170':'60,15,5')+','+(0.03+R()*0.05)+')';g.fillRect(R()*S,R()*S,1.3,1.3);}
+  gr=g.createRadialGradient(H,H,H*0.72,H,H,H);gr.addColorStop(0,'rgba(50,12,4,0)');gr.addColorStop(.88,'rgba(50,12,4,.5)');gr.addColorStop(1,'rgba(30,6,2,.85)');
+  g.fillStyle=gr;g.fillRect(0,0,S,S);
+  g.restore();
+  return cv;
+}
+
+/* ---------- graph extraction ---------- */
+const NODES=[],LINKS=[];
+(function(){
+  NODES.push({x:DISC.x,y:DISC.y,hub:true,deg:0,d:0});
+  const keyNode={};const key=(vi,i)=>vi+':'+i;
+  VESSELS.forEach((v,vi)=>{
+    const ks=[0].concat(v.br.slice().sort((a,b)=>a-b)).concat([v.pts.length-1]);
+    const uniq=ks.filter((k,i)=>i===0||k!==ks[i-1]);
+    uniq.forEach((k,idx)=>{
+      if(idx===0){
+        if(v.parent){keyNode[key(vi,0)]=keyNode[key(v.parent.v,v.parent.i)];}
+        else{NODES.push({x:v.pts[0].x,y:v.pts[0].y,deg:0,kind:v.kind});keyNode[key(vi,0)]=NODES.length-1;
+          LINKS.push({a:0,b:NODES.length-1,pts:[new THREE.Vector2(DISC.x,DISC.y),v.pts[0].clone()],kind:v.kind==='A'?0:1,w:v.w,hub:true});}
+      }else{NODES.push({x:v.pts[k].x,y:v.pts[k].y,deg:0,kind:v.kind});keyNode[key(vi,k)]=NODES.length-1;}
+    });
+    for(let q=0;q<uniq.length-1;q++){
+      const a=uniq[q],b=uniq[q+1];
+      LINKS.push({a:keyNode[key(vi,a)],b:keyNode[key(vi,b)],pts:v.pts.slice(a,b+1).map(p=>p.clone()),kind:v.kind==='A'?0:1,w:v.w});
+    }
+  });
+  LINKS.forEach(l=>{NODES[l.a].deg++;NODES[l.b].deg++;
+    let len=0;for(let i=1;i<l.pts.length;i++)len+=l.pts[i].distanceTo(l.pts[i-1]);
+    const ch=l.pts[0].distanceTo(l.pts[l.pts.length-1])||1e-4;l.len=len;l.tort=clamp((len/ch-1)/0.1,0,1);});
+  // distance from hub
+  NODES.forEach(n=>n.d=1e9);NODES[0].d=0;
+  for(let it=0;it<400;it++){let ch=false;LINKS.forEach(l=>{
+    if(NODES[l.a].d+l.len<NODES[l.b].d){NODES[l.b].d=NODES[l.a].d+l.len;ch=true;}
+    if(NODES[l.b].d+l.len<NODES[l.a].d){NODES[l.a].d=NODES[l.b].d+l.len;ch=true;}});if(!ch)break;}
+  let mx=0;NODES.forEach(n=>{if(n.d<1e8)mx=Math.max(mx,n.d)});NODES.forEach(n=>{n.d=n.d>1e8?1:n.d/mx});
+  const wmax=0.0085;LINKS.forEach(l=>{l.wn=clamp(l.w/wmax,0,1);l.d0=NODES[l.a].d;l.d1=NODES[l.b].d;});
+  // clusters (k-means, k=8)
+  const K=8,pts=NODES.map(n=>[n.x,n.y]);let cen=[pts[Math.floor(pts.length*0.1)]];
+  while(cen.length<K){let best=-1,bd=-1;pts.forEach((p,i)=>{let dm=1e9;cen.forEach(c=>dm=Math.min(dm,Math.hypot(p[0]-c[0],p[1]-c[1])));if(dm>bd){bd=dm;best=i}});cen.push(pts[best]);}
+  cen=cen.map(c=>c.slice());let asg=new Array(pts.length).fill(0);
+  for(let it=0;it<24;it++){pts.forEach((p,i)=>{let b=0,bd=1e9;cen.forEach((c,ci)=>{const d=Math.hypot(p[0]-c[0],p[1]-c[1]);if(d<bd){bd=d;b=ci}});asg[i]=b});
+    cen.forEach((c,ci)=>{let sx=0,sy=0,n=0;pts.forEach((p,i)=>{if(asg[i]===ci){sx+=p[0];sy+=p[1];n++}});if(n){c[0]=sx/n;c[1]=sy/n}});}
+  NODES.forEach((n,i)=>n.cl=asg[i]);
+  window.__CEN=cen;
+})();
+const CEN=window.__CEN;delete window.__CEN;
+/* coarse edges */
+const CEDGES=(function(){
+  const set={};LINKS.forEach(l=>{const a=NODES[l.a].cl,b=NODES[l.b].cl;if(a!==b)set[Math.min(a,b)+'-'+Math.max(a,b)]=1;});
+  const dist=(a,b)=>Math.hypot(CEN[a][0]-CEN[b][0],CEN[a][1]-CEN[b][1]);
+  let out=Object.keys(set).map(k=>k.split('-').map(Number)).filter(e=>dist(e[0],e[1])<0.95);
+  // ensure connected: union-find + add shortest bridging edges
+  const par=CEN.map((_,i)=>i),f=x=>par[x]===x?x:(par[x]=f(par[x]));out.forEach(e=>par[f(e[0])]=f(e[1]));
+  for(let it=0;it<10;it++){let best=null,bd=1e9;for(let a=0;a<CEN.length;a++)for(let b=a+1;b<CEN.length;b++){if(f(a)!==f(b)){const d=dist(a,b);if(d<bd){bd=d;best=[a,b]}}}
+    if(!best)break;out.push(best);par[f(best[0])]=f(best[1]);}
+  // layer coloring: greedy so adjacent edges differ where possible
+  const lay=[];out.forEach((e,i)=>{const used={};out.forEach((o,j)=>{if(j<i&&(o[0]===e[0]||o[0]===e[1]||o[1]===e[0]||o[1]===e[1]))used[lay[j]]=1});lay.push(used[0]?1:0);});
+  return out.map((e,i)=>({a:e[0],b:e[1],layer:lay[i]}));
+})();
+
+/* ---------- renderer ---------- */
+const canvas=$('#gl');
+const renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true,powerPreference:'high-performance'});
+renderer.setClearColor(COL.bg,1);
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(COL.bg,8,36);
+const camera=new THREE.PerspectiveCamera(38,1,0.05,90);
+
+function dotTex(inner,outer){const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');
+  const gr=g.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,inner);gr.addColorStop(.4,inner);gr.addColorStop(1,outer);g.fillStyle=gr;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c);}
+
+/* dust for parallax */
+(function(){
+  const n=1500,pos=new Float32Array(n*3),R=rng(3);
+  for(let i=0;i<n;i++){pos[i*3]=-5+R()*34;pos[i*3+1]=-3.2+R()*6.4;pos[i*3+2]=-4+R()*8.5;}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  const m=new THREE.PointsMaterial({size:0.03,map:dotTex('rgba(15,35,64,.5)','rgba(15,35,64,0)'),transparent:true,depthWrite:false,sizeAttenuation:true,opacity:.55});
+  scene.add(new THREE.Points(g,m));
+})();
+
+/* ---------- retina ---------- */
+const W={};
+{
+  const tex=new THREE.CanvasTexture(makeFundus(1536));tex.anisotropy=8;tex.minFilter=THREE.LinearMipmapLinearFilter;
+  const mat=new THREE.ShaderMaterial({transparent:true,
+    uniforms:{map:{value:tex},uDim:{value:0},uScanOn:{value:0},uScan:{value:-1},uBg:{value:new THREE.Color(0xDDE4E8)}},
+    vertexShader:'varying vec2 vUv;varying vec2 vP;void main(){vUv=uv;vP=position.xy;vec3 p=position;p.z=0.15*dot(p.xy,p.xy);gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);}',
+    fragmentShader:'uniform sampler2D map;uniform float uDim,uScanOn,uScan;uniform vec3 uBg;varying vec2 vUv;varying vec2 vP;'+
+     'void main(){float r=length(vP);if(r>1.0)discard;vec4 c=texture2D(map,vUv);float g=dot(c.rgb,vec3(.3,.59,.11));'+
+     'vec3 grey=mix(vec3(g),uBg,.55);c.rgb=mix(c.rgb,grey,uDim);float s=exp(-pow((vP.x-uScan)*8.,2.))*uScanOn;'+
+     'c.rgb=mix(c.rgb,vec3(.16,.79,.73),s*.3);gl_FragColor=vec4(c.rgb,1.-smoothstep(.993,1.,r));}'});
+  const ret=new THREE.Mesh(new THREE.PlaneGeometry(2,2,80,80),mat);scene.add(ret);W.ret=ret;W.retMat=mat;
+  const sh=new THREE.Mesh(new THREE.PlaneGeometry(3.2,3.2),new THREE.MeshBasicMaterial({map:(function(){const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d');
+    const gr=g.createRadialGradient(128,128,70,128,128,128);gr.addColorStop(0,'rgba(15,35,64,.30)');gr.addColorStop(1,'rgba(15,35,64,0)');g.fillStyle=gr;g.fillRect(0,0,256,256);return new THREE.CanvasTexture(c)})(),transparent:true,depthWrite:false}));
+  sh.position.set(0.02,-0.1,-0.25);scene.add(sh);W.shadow=sh;
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(1.0,0.007,6,160),new THREE.MeshBasicMaterial({color:COL.navy,transparent:true,opacity:.32}));ring.position.z=0.15;scene.add(ring);W.rim=ring;
+}
+
+/* ---------- link shader + tube merge ---------- */
+const LV='attribute float aT;attribute float aD;attribute float aTort;attribute float aPeri;attribute float aKind;attribute float aW;'+
+ 'varying float vD,vTort,vPeri,vKind,vW;varying vec3 vN,vV;'+
+ 'void main(){vD=aD;vTort=aTort;vPeri=aPeri;vKind=aKind;vW=aW;vec4 mv=modelViewMatrix*vec4(position,1.);vN=normalize(normalMatrix*normal);vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}';
+const LF='uniform vec3 uColA,uColV,uPulseCol,uHi;uniform float uAlpha,uDrawA,uDrawV,uP1,uP2,uMode,uModeAmt;'+
+ 'varying float vD,vTort,vPeri,vKind,vW;varying vec3 vN,vV;'+
+ 'void main(){float draw=mix(uDrawA,uDrawV,vKind);float vis=1.0-smoothstep(draw-.01,draw,vD);if(vis<.01)discard;'+
+ 'float edge=exp(-pow((vD-draw)*38.,2.))*step(.002,draw)*step(draw,.995);'+
+ 'vec3 col=mix(uColA,uColV,vKind);float a=1.0;float h=1.0;'+
+ 'if(uMode>1.5&&uMode<2.5){h=mix(.3,1.,smoothstep(.15,.7,vW));col=mix(col,mix(vec3(.17,.82,.76),vec3(.07,.27,.5),vKind),uModeAmt);}'+
+ 'else if(uMode>2.5&&uMode<3.5){h=mix(.1,1.,smoothstep(.25,.75,vTort));col=mix(col,uHi,uModeAmt*step(.4,h));}'+
+ 'else if(uMode>3.5&&uMode<4.5){h=.3;}'+
+ 'else if(uMode>4.5){h=mix(.1,1.,vPeri);col=mix(col,uHi,uModeAmt*vPeri);}'+
+ 'a=mix(1.,h,uModeAmt);'+
+ 'float p=clamp(exp(-pow((vD-uP1)*14.,2.))+exp(-pow((vD-uP2)*14.,2.)),0.,1.);col=mix(col,uPulseCol,p);a=max(a,p*.9);'+
+ 'float f=pow(1.-abs(dot(vN,vV)),1.5);col*=mix(1.12,.62,f);col=mix(col,vec3(1.),edge*.55);a=max(a,edge);'+
+ 'gl_FragColor=vec4(col,a*uAlpha*vis);}';
+function linkMat(a,v){return new THREE.ShaderMaterial({transparent:true,depthWrite:false,side:THREE.DoubleSide,vertexShader:LV,fragmentShader:LF,
+  uniforms:{uColA:{value:new THREE.Color(a)},uColV:{value:new THREE.Color(v)},uPulseCol:{value:new THREE.Color(COL.navy)},uHi:{value:new THREE.Color(COL.navy)},
+  uAlpha:{value:1},uDrawA:{value:0},uDrawV:{value:0},uP1:{value:-2},uP2:{value:-2},uMode:{value:0},uModeAmt:{value:0}}});}
+function mergeTubes(items){
+  const pos=[],nor=[],idx=[],A={aT:[],aD:[],aTort:[],aPeri:[],aKind:[],aW:[]};let off=0;
+  items.forEach(it=>{
+    const curve=new THREE.CatmullRomCurve3(it.pts,false,'centripetal');
+    const segs=Math.max(4,Math.min(36,it.pts.length*2)),rad=5;
+    const g=new THREE.TubeGeometry(curve,segs,it.r,rad,false);
+    const p=g.attributes.position,n=g.attributes.normal,ix=g.index,vc=p.count;
+    for(let i=0;i<vc;i++){
+      pos.push(p.getX(i),p.getY(i),p.getZ(i));nor.push(n.getX(i),n.getY(i),n.getZ(i));
+      const t=Math.floor(i/(rad+1))/segs;A.aT.push(t);A.aD.push(lerp(it.d0,it.d1,t));A.aTort.push(it.tort||0);A.aKind.push(it.kind||0);A.aW.push(it.w||0);
+      const dd=Math.hypot(p.getX(i)-DISC.x,p.getY(i)-DISC.y);A.aPeri.push(dd>0.115&&dd<0.25?1:0);
+    }
+    for(let i=0;i<ix.count;i++)idx.push(ix.getX(i)+off);off+=vc;g.dispose();
+  });
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
+  Object.keys(A).forEach(k=>g.setAttribute(k,new THREE.Float32BufferAttribute(A[k],1)));
+  g.setIndex(idx);return g;
+}
+const v3=(x,y,dz)=>new THREE.Vector3(x,y,bowl(x,y)+(dz||0.012));
+
+/* ---------- graph group (lifts off the retina) ---------- */
+const GG=new THREE.Group();scene.add(GG);W.GG=GG;
+{
+  const items=LINKS.map(l=>({pts:l.pts.map(p=>v3(p.x,p.y)),r:0.0022+l.w*0.45,d0:l.d0,d1:l.d1,tort:l.tort,kind:l.kind,w:l.wn}));
+  W.linkMat=linkMat(COL.teal,0x0B5A73);
+  W.links=new THREE.Mesh(mergeTubes(items),W.linkMat);W.links.renderOrder=2;GG.add(W.links);
+  // disc + cup outlines
+  const circ=(cx,cy,r)=>{const p=[];for(let i=0;i<=56;i++){const a=i/56*6.2832;p.push(v3(cx+Math.cos(a)*r,cy+Math.sin(a)*r,0.016))}return p};
+  W.ringMat=linkMat(COL.teal,COL.teal);
+  W.rings=new THREE.Mesh(mergeTubes([{pts:circ(DISC.x,DISC.y,DISC_R),r:0.0034,d0:0,d1:1},{pts:circ(DISC.x+CUP_OFF.x,DISC.y+CUP_OFF.y,CUP_R),r:0.0034,d0:0,d1:1}]),W.ringMat);W.rings.renderOrder=3;GG.add(W.rings);
+  // rim fill
+  const sh=new THREE.Shape();sh.absarc(DISC.x,DISC.y,DISC_R,0,6.2832,false);
+  const hole=new THREE.Path();hole.absarc(DISC.x+CUP_OFF.x,DISC.y+CUP_OFF.y,CUP_R,0,6.2832,true);sh.holes.push(hole);
+  W.rimFill=new THREE.Mesh(new THREE.ShapeGeometry(sh,48),new THREE.MeshBasicMaterial({color:COL.teal,transparent:true,opacity:0,depthWrite:false}));
+  W.rimFill.position.z=bowl(DISC.x,DISC.y)+0.008;GG.add(W.rimFill);
+  // peripapillary annulus
+  W.annulus=new THREE.Mesh(new THREE.RingGeometry(0.115,0.25,72),new THREE.MeshBasicMaterial({color:COL.navy,transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide}));
+  W.annulus.position.set(DISC.x,DISC.y,bowl(DISC.x,DISC.y)+0.006);GG.add(W.annulus);
+  // nodes
+  const nm=new THREE.MeshBasicMaterial({color:0xffffff});
+  W.nodes=new THREE.InstancedMesh(new THREE.SphereGeometry(1,14,10),nm,NODES.length);W.nodes.renderOrder=4;
+  W.nodes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);GG.add(W.nodes);
+  W.nodeCol=NODES.map((n,i)=>new THREE.Color(n.hub?COL.navy:COL.teal));
+  W.nodes.setColorAt(0,W.nodeCol[0]);
+  // gather lines
+  const gp=new Float32Array(NODES.length*6),gg=new THREE.BufferGeometry();gg.setAttribute('position',new THREE.BufferAttribute(gp,3));
+  W.gather=new THREE.LineSegments(gg,new THREE.LineBasicMaterial({color:COL.orange,transparent:true,opacity:0,depthWrite:false}));W.gatherPos=gp;GG.add(W.gather);
+}
+/* ---------- quantum circuit (shares the vessel layout) ---------- */
+W.cp=CEN.map((c,i)=>{const x=c[0],y=c[1];return new THREE.Vector3(x,y,bowl(x,y)+0.045)});
+W.qubits=[];W.gates=[];
+{
+  const QG=new THREE.Group();GG.add(QG);W.QG=QG;
+  const items=CEDGES.map(e=>{const a=W.cp[e.a],b=W.cp[e.b],m=a.clone().add(b).multiplyScalar(.5);m.z+=0.07;
+    return {pts:[a,m,b],r:0.0052,d0:e.layer?0.5:0,d1:e.layer?1:0.5,kind:0,w:1};});
+  W.cMat=linkMat(COL.orange,COL.orange);W.cMat.uniforms.uPulseCol.value=new THREE.Color(0xFFE2B8);
+  W.cLinks=new THREE.Mesh(mergeTubes(items),W.cMat);W.cLinks.renderOrder=5;QG.add(W.cLinks);
+  W.cCurves=CEDGES.map(e=>{const a=W.cp[e.a],b=W.cp[e.b],m=a.clone().add(b).multiplyScalar(.5);m.z+=0.07;return new THREE.QuadraticBezierCurve3(a,m.clone().add(m).sub(a.clone().add(b).multiplyScalar(.5)),b)});
+  const gm=new THREE.MeshBasicMaterial({color:COL.orange});
+  CEDGES.forEach((e,i)=>{const m=new THREE.Mesh(new THREE.OctahedronGeometry(0.03),gm.clone());m.position.copy(W.cCurves[i].getPoint(.5));m.scale.setScalar(0.001);QG.add(m);W.gates.push(m);});
+  // flow particles
+  const PN=CEDGES.length*5,pp=new Float32Array(PN*3),pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(pp,3));
+  W.flow=new THREE.Points(pg,new THREE.PointsMaterial({size:0.026,color:0xB8480A,map:dotTex('rgba(255,255,255,1)','rgba(255,255,255,0)'),transparent:true,depthWrite:false,opacity:0,sizeAttenuation:true}));
+  W.flowPos=pp;QG.add(W.flow);
+  // qubits
+  const TH=[2.1,0.9,1.7,2.5,1.2,0.6,1.9,1.4];
+  CEN.forEach((c,i)=>{
+    const g=new THREE.Group();g.position.copy(W.cp[i]);const r=0.085;
+    const sph=new THREE.Mesh(new THREE.SphereGeometry(r,24,16),new THREE.MeshBasicMaterial({color:0xFFE9D0,transparent:true,opacity:.5,depthWrite:false}));
+    const wire=new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.SphereGeometry(r,12,8)),new THREE.LineBasicMaterial({color:COL.orange,transparent:true,opacity:.45}));
+    const eq=new THREE.Mesh(new THREE.TorusGeometry(r,0.0025,6,40),new THREE.MeshBasicMaterial({color:COL.orange}));eq.rotation.x=Math.PI/2.6;
+    const pivot=new THREE.Group();
+    const shaft=new THREE.Mesh(new THREE.CylinderGeometry(0.0045,0.0045,r*1.7,8),new THREE.MeshBasicMaterial({color:COL.navy}));shaft.position.y=r*0.85;
+    const head=new THREE.Mesh(new THREE.ConeGeometry(0.014,0.04,10),new THREE.MeshBasicMaterial({color:COL.navy}));head.position.y=r*1.7+0.012;
+    pivot.add(shaft,head);
+    const gr1=new THREE.Mesh(new THREE.TorusGeometry(r*1.55,0.0045,8,48),new THREE.MeshBasicMaterial({color:COL.orange,transparent:true,opacity:0}));gr1.rotation.x=1.1;
+    const gr2=new THREE.Mesh(new THREE.TorusGeometry(r*1.8,0.0045,8,48),new THREE.MeshBasicMaterial({color:COL.orange,transparent:true,opacity:0}));gr2.rotation.set(0.5,0.9,0);
+    const fl=new THREE.Mesh(new THREE.RingGeometry(r*1.1,r*1.22,40),new THREE.MeshBasicMaterial({color:COL.orange,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false}));
+    g.add(sph,wire,eq,pivot,gr1,gr2,fl);g.scale.setScalar(0.001);QG.add(g);
+    W.qubits.push({g:g,sph:sph,wire:wire,pivot:pivot,gr1:gr1,gr2:gr2,fl:fl,th:TH[i%8],ph:0.5+((i*0.37)%1)*0.9,bit:(i%3===0)?0:1});
+  });
+}
+
+/* ---------- causal zone ---------- */
+const CX=10,TILE_X=[0,1,2,3].map(i=>CX+(i-1.5)*1.3),TH_=1.4;
+W.tiles=[];W.cfD=1;W.tileKey=[];
+const TILE_CV=[0,1,2,3].map(()=>{const c=document.createElement('canvas');c.width=512;c.height=716;return c});
+const TILE_TITLE=['Vascular changes','Structural damage','Functional loss','Severity stage'];
+function rrect(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
+function drawTile(i,st){
+  const c=TILE_CV[i],g=c.getContext('2d'),f=[st.f1,st.f2,st.f3,st.f4][i],coral='#E5566B';
+  g.clearRect(0,0,512,716);g.fillStyle='#FFFFFF';rrect(g,6,6,500,704,30);g.fill();
+  g.lineWidth=4;g.strokeStyle=f>0.5?coral:'rgba(15,35,64,.18)';g.stroke();
+  g.fillStyle=f>0.5?'rgba(229,86,107,.12)':'rgba(15,35,64,.05)';rrect(g,6,6,500,150,30);g.fill();g.fillRect(6,100,500,56);
+  g.fillStyle='#7C8DA1';g.font='600 26px "Hanken Grotesk",sans-serif';g.textBaseline='alphabetic';g.fillText('STEP '+(i+1),40,60);
+  g.fillStyle='#0F2340';g.font='400 56px "Instrument Serif",Georgia,serif';g.fillText(TILE_TITLE[i],40,128);
+  const cx=256,cy=410;g.lineCap='round';
+  if(i===0){
+    const col=f>0.5?coral:'#0E8F8A',w=(1-0.55*f);
+    (function br(x,y,a,l,wd,d){const ex=x+Math.sin(a)*l,ey=y-Math.cos(a)*l;g.strokeStyle=col;g.lineWidth=Math.max(2,wd*w);g.beginPath();g.moveTo(x,y);g.lineTo(ex,ey);g.stroke();
+      if(d>0){br(ex,ey,a-0.5,l*0.72,wd*0.68,d-1);br(ex,ey,a+0.45,l*0.72,wd*0.68,d-1);}})(256,600,0,130,16,4);
+  }else if(i===1){
+    const d=st.d;g.fillStyle='#FBE7B5';g.strokeStyle='rgba(180,110,50,.6)';g.lineWidth=4;g.beginPath();g.arc(cx,cy,150,0,6.2832);g.fill();g.stroke();
+    const cr=76+34*d,co=8+16*d;g.fillStyle='#FFFDF4';g.beginPath();g.arc(cx,cy+co,cr,0,6.2832);g.fill();
+    if(d>0.35){g.strokeStyle=coral;g.lineWidth=14*d;g.beginPath();g.arc(cx,cy,142,Math.PI*0.28,Math.PI*0.72);g.stroke();
+      g.fillStyle=coral;g.font='600 24px "Hanken Grotesk",sans-serif';g.textAlign='center';g.fillText('inferior rim thins',cx,cy+205);g.textAlign='left';}
+    else{g.fillStyle='#0E8F8A';g.font='600 24px "Hanken Grotesk",sans-serif';g.textAlign='center';g.fillText('inferior rim intact',cx,cy+205);g.textAlign='left';}
+  }else if(i===2){
+    g.strokeStyle='rgba(15,35,64,.25)';g.lineWidth=3;g.fillStyle='#F6F9FA';g.beginPath();g.arc(cx,cy,150,0,6.2832);g.fill();g.stroke();
+    g.lineWidth=1.5;for(let k=-100;k<=100;k+=50){g.beginPath();g.moveTo(cx-150,cy+k);g.lineTo(cx+150,cy+k);g.moveTo(cx+k,cy-150);g.lineTo(cx+k,cy+150);g.stroke();}
+    g.fillStyle='rgba(15,35,64,'+(0.55*f)+')';g.beginPath();g.arc(cx,cy,118,-2.6,-0.5,false);g.arc(cx,cy,74,-0.5,-2.6,true);g.closePath();g.fill();
+    g.fillStyle='rgba(15,35,64,.3)';g.beginPath();g.ellipse(cx+98,cy+6,13,18,0,0,6.2832);g.fill();
+    g.fillStyle=f>0.5?coral:'#7C8DA1';g.font='600 24px "Hanken Grotesk",sans-serif';g.textAlign='center';g.fillText(f>0.5?'arc-shaped loss':'field preserved',cx,cy+205);g.textAlign='left';
+  }else{
+    const names=['Normal','Early','Moderate','Advanced'],cur=st.d>0.5?2:1;
+    names.forEach((n,k)=>{const y=210+k*74;g.fillStyle=k===cur?coral:'rgba(15,35,64,.07)';rrect(g,50,y,412,56,14);g.fill();
+      g.fillStyle=k===cur?'#fff':'#7C8DA1';g.font='600 28px "Hanken Grotesk",sans-serif';g.fillText(n,76,y+38);});
+    g.fillStyle='#0F2340';g.font='italic 400 64px "Instrument Serif",Georgia,serif';g.textAlign='center';g.fillText(names[cur],cx,640);g.textAlign='left';
+  }
+  g.fillStyle=f>0.5?coral:'#7C8DA1';g.font='600 22px "Hanken Grotesk",sans-serif';g.textAlign='center';
+  g.fillText(i===3?'Result':(f>0.5?'Triggered':'Holding'),cx,690);g.textAlign='left';
+}
+{
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(10,5),new THREE.MeshBasicMaterial({map:(function(){const c=document.createElement('canvas');c.width=256;c.height=128;const g=c.getContext('2d');
+    const gr=g.createRadialGradient(128,64,10,128,64,128);gr.addColorStop(0,'rgba(15,35,64,.10)');gr.addColorStop(1,'rgba(15,35,64,0)');g.fillStyle=gr;g.fillRect(0,0,256,128);return new THREE.CanvasTexture(c)})(),transparent:true,depthWrite:false}));
+  floor.rotation.x=-Math.PI/2;floor.position.set(CX,-0.71,0.3);scene.add(floor);W.floor=floor;
+  TILE_X.forEach((x,i)=>{
+    drawTile(i,{f1:0,f2:0,f3:0,f4:0,d:1});const tx=new THREE.CanvasTexture(TILE_CV[i]);tx.anisotropy=8;
+    const side=new THREE.MeshBasicMaterial({color:0xDCE4E8});
+    const mats=[side,side,side,side,new THREE.MeshBasicMaterial({map:tx,transparent:true}),new THREE.MeshBasicMaterial({color:0xEEF2F4})];
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(0.95,TH_,0.06),mats);mesh.position.y=TH_/2;
+    const piv=new THREE.Group();piv.position.set(x,-0.7,0);piv.add(mesh);scene.add(piv);
+    const glow=new THREE.Mesh(new THREE.CircleGeometry(0.62,40),new THREE.MeshBasicMaterial({color:COL.coral,transparent:true,opacity:0,depthWrite:false}));
+    glow.rotation.x=-Math.PI/2;glow.position.set(x,-0.695,0.05);glow.scale.set(1,0.55,1);scene.add(glow);
+    W.tiles.push({piv:piv,tx:tx,glow:glow});W.tileKey.push('');
+  });
+  W.arrows=[0,1,2].map(i=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(1,0.05),new THREE.MeshBasicMaterial({color:COL.coral,transparent:true,opacity:.9}));
+    m.rotation.x=-Math.PI/2;m.position.set((TILE_X[i]+TILE_X[i+1])/2,-0.69,0.62);m.scale.x=0.001;scene.add(m);
+    const h=new THREE.Mesh(new THREE.ConeGeometry(0.06,0.14,3),new THREE.MeshBasicMaterial({color:COL.coral}));h.rotation.set(Math.PI/2,0,-Math.PI/2);h.position.set(TILE_X[i+1]-0.42,-0.69,0.62);h.visible=false;scene.add(h);return {m:m,h:h};});
+}
+
+/* ---------- novelty zone: four lenses and one beam ---------- */
+const NX=22;
+W.lenses=[];
+{
+  const defs=[{c:COL.orange,hex:'#E8780F',g:'q'},{c:COL.teal,hex:'#0E8F8A',g:'v'},{c:COL.coral,hex:'#E5566B',g:'c'},{c:COL.violet,hex:'#6C5CE7',g:'f'}];
+  function lensTex(d){const cv=document.createElement('canvas');cv.width=cv.height=512;const g=cv.getContext('2d');
+    const gr=g.createRadialGradient(256,256,60,256,256,256);gr.addColorStop(0,d.hex+'10');gr.addColorStop(.75,d.hex+'26');gr.addColorStop(1,d.hex+'66');g.fillStyle=gr;g.beginPath();g.arc(256,256,256,0,6.2832);g.fill();
+    g.strokeStyle='rgba(255,255,255,.85)';g.lineWidth=10;g.beginPath();g.arc(256,256,226,3.6,4.7);g.stroke();
+    g.strokeStyle=d.hex;g.lineWidth=7;g.lineCap='round';g.fillStyle=d.hex;
+    if(d.g==='q'){g.beginPath();g.arc(256,256,64,0,6.2832);g.stroke();g.beginPath();g.ellipse(256,256,64,22,0,0,6.2832);g.stroke();g.beginPath();g.moveTo(256,256);g.lineTo(300,196);g.stroke();g.beginPath();g.arc(300,196,8,0,6.2832);g.fill();}
+    if(d.g==='v'){(function br(x,y,a,l,w,k){const ex=x+Math.sin(a)*l,ey=y-Math.cos(a)*l;g.lineWidth=w;g.beginPath();g.moveTo(x,y);g.lineTo(ex,ey);g.stroke();if(k>0){br(ex,ey,a-0.55,l*0.7,w*0.7,k-1);br(ex,ey,a+0.5,l*0.7,w*0.7,k-1);}})(256,330,0,60,9,3);}
+    if(d.g==='c'){[[190,256],[256,256],[322,256]].forEach((p,k)=>{g.beginPath();g.arc(p[0],p[1],14,0,6.2832);g.fill();if(k<2){g.lineWidth=5;g.beginPath();g.moveTo(p[0]+16,p[1]);g.lineTo(p[0]+50,p[1]);g.stroke();}});}
+    if(d.g==='f'){g.lineWidth=5;g.beginPath();g.arc(256,256,70,0,6.2832);g.stroke();g.beginPath();g.arc(256,256,38,0,6.2832);g.stroke();g.lineWidth=14;g.beginPath();g.arc(256,256,54,-2.6,-0.6);g.stroke();}
+    return new THREE.CanvasTexture(cv);}
+  const sc=[[-1.55,0.8,0.1,0.25,0.5],[1.55,0.8,-0.2,-0.3,-0.35],[-1.55,-0.8,-0.15,0.3,-0.4],[1.55,-0.8,0.2,-0.25,0.35]];
+  defs.forEach((d,i)=>{
+    const g=new THREE.Group();
+    const disc=new THREE.Mesh(new THREE.CircleGeometry(0.86,64),new THREE.MeshBasicMaterial({map:lensTex(d),transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+    const ring=new THREE.Mesh(new THREE.RingGeometry(0.845,0.88,96),new THREE.MeshBasicMaterial({color:d.c,transparent:true,opacity:.95,side:THREE.DoubleSide}));
+    const ring2=new THREE.Mesh(new THREE.RingGeometry(0.53,0.538,72),new THREE.MeshBasicMaterial({color:d.c,transparent:true,opacity:.35,side:THREE.DoubleSide}));
+    g.add(disc,ring,ring2);scene.add(g);
+    W.lenses.push({g:g,s:{x:NX+sc[i][0],y:sc[i][1],z:sc[i][2],rx:sc[i][3],ry:sc[i][4]},a:{x:NX,y:0,z:[-1.2,-0.4,0.4,1.2][i],rx:0,ry:0},mats:[disc.material,ring.material,ring2.material]});
+  });
+  W.beam=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.9,4.6,48,1,true).rotateX(Math.PI/2),new THREE.ShaderMaterial({transparent:true,depthWrite:false,side:THREE.DoubleSide,
+    uniforms:{uA:{value:0}},
+    vertexShader:'varying vec3 vN,vV;varying float vY;void main(){vY=uv.y;vec4 mv=modelViewMatrix*vec4(position,1.);vN=normalize(normalMatrix*normal);vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}',
+    fragmentShader:'uniform float uA;varying vec3 vN,vV;varying float vY;void main(){float f=pow(1.-abs(dot(vN,vV)),1.4);vec3 c=mix(vec3(.91,.47,.06),vec3(.9,.33,.42),smoothstep(.2,.9,vY));float a=(.07+.4*f)*uA*(.35+.65*vY);gl_FragColor=vec4(c,a);}'}));
+  W.beam.position.set(NX,0,0.1);scene.add(W.beam);
+  W.focus=new THREE.Sprite(new THREE.SpriteMaterial({map:dotTex('rgba(255,255,255,1)','rgba(232,120,15,0)'),transparent:true,opacity:0,depthWrite:false}));
+  W.focus.position.set(NX,0,2.35);W.focus.scale.setScalar(1.1);scene.add(W.focus);
+  W.focus2=new THREE.Sprite(new THREE.SpriteMaterial({map:dotTex('rgba(232,120,15,.9)','rgba(232,120,15,0)'),transparent:true,opacity:0,depthWrite:false}));
+  W.focus2.position.copy(W.focus.position);W.focus2.scale.setScalar(0.34);scene.add(W.focus2);
+}
+
+/* =====================  UI + LOOP  ===================== */
+const capEl=$('#cap'),kickEl=$('#cap .kick span'),h1=$('#cap h1'),bodyEl=$('#cap .body'),termsEl=$('#cap .terms');
+const vig=$('#vig'),tagsEl=$('#tags'),navEl=$('#nav'),railI=$('#rail i'),countEl=$('#count');
+const sayEl=$('#say'),sayS=$('#say span'),pbtn=$('#pbtn'),spacer=$('#spacer'),cf=$('#cf'),cfline=$('#cfline');
+
+/* ---------- sizing ---------- */
+let VW=1,VH=1,MAXS=1,UNIT=1,ASPECT=1,panelAmt=0,lastOff=-9;
+function resize(){
+  VW=window.innerWidth;VH=window.innerHeight;ASPECT=VW/VH;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(VW,VH,false);
+  camera.aspect=ASPECT;
+  lastOff=-9;applyOffset();
+  UNIT=VH*0.9;spacer.style.height=((N-1)*UNIT+VH)+'px';MAXS=(N-1)*UNIT;
+}
+function applyOffset(){
+  const o=VW>860?-VW*lerp(0.12,0.0,panelAmt):0, oy=VW>860?0:VH*0.1;
+  const k=o+'|'+oy;if(k===lastOff)return;lastOff=k;
+  camera.setViewOffset(VW,VH,o,oy,VW,VH);camera.updateProjectionMatrix();
+}
+window.addEventListener('resize',resize);
+
+/* ---------- scroll, beats ---------- */
+let Tt=0,T=0,forced=null,snapTimer=0;
+function readScroll(){Tt=clamp(window.scrollY/MAXS,0,1)*(N-1);}
+function goBeat(b){b=clamp(Math.round(b),0,N-1);window.scrollTo({top:b/(N-1)*MAXS,behavior:REDUCE?'auto':'smooth'});}
+function snap(){const b=Math.round(Tt);if(Math.abs(Tt-b)>0.03)goBeat(b);}
+window.addEventListener('scroll',function(){if(forced!==null)return;readScroll();clearTimeout(snapTimer);snapTimer=setTimeout(snap,300);},{passive:true});
+window.addEventListener('keydown',function(e){
+  const tg=e.target;if(tg&&(tg.id==='cf'||tg.tagName==='BUTTON')&&(e.key===' '||e.key.indexOf('Arrow')===0)){if(tg.id==='cf')return;}
+  const b=clamp(Math.round(forced!==null?forced:Tt),0,N-1);
+  if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key==='PageDown'||(e.key===' '&&!(tg&&tg.tagName==='BUTTON'))){e.preventDefault();goBeat(b+1);}
+  else if(e.key==='ArrowLeft'||e.key==='ArrowUp'||e.key==='PageUp'){e.preventDefault();goBeat(b-1);}
+  else if(e.key==='Home'){e.preventDefault();goBeat(0);}
+  else if(e.key==='End'){e.preventDefault();goBeat(N-1);}
+  else if(e.key==='p'||e.key==='P'){togglePres();}
+});
+let pres=false;
+function togglePres(){pres=!pres;sayEl.classList.toggle('on',pres);pbtn.classList.toggle('on',pres);pbtn.setAttribute('aria-pressed',pres?'true':'false');}
+pbtn.addEventListener('click',togglePres);
+
+/* nav chips */
+const navBtns=SCENES.map(function(s){const b=document.createElement('button');b.type='button';b.innerHTML='<i></i>'+s.n;b.style.setProperty('--c',s.c);b.addEventListener('click',function(){goBeat(s.b);});navEl.appendChild(b);return b;});
+
+/* ---------- caption + panels ---------- */
+let curB=-1,swapTimer=0;
+const BIO={6:['cal','avr'],7:['tor'],8:['bra'],9:['per']};
+function onBeat(b){
+  const d=BEATS[b];
+  capEl.classList.add('out');clearTimeout(swapTimer);
+  swapTimer=setTimeout(function(){
+    capEl.style.setProperty('--c',d.c);kickEl.textContent=d.k;h1.innerHTML=d.t;bodyEl.textContent=d.b;
+    termsEl.innerHTML=(d.terms||[]).map(function(t){return '<div><strong>'+t[0]+'.</strong> '+t[1]+'</div>';}).join('');
+    capEl.classList.remove('out');
+  },curB<0||REDUCE?0:190);
+  $$('.panel').forEach(function(p){p.classList.toggle('on',p.id==='p-'+(d.panel||'_'));});
+  const keys=BIO[b]||[];$$('#p-bio li').forEach(function(li){li.classList.toggle('on',keys.indexOf(li.dataset.k)>=0);});
+  $$('.bars i').forEach(function(i){i.style.height=(b===15?Math.round(parseFloat(i.dataset.p)*100):2)+'%';});
+  navBtns.forEach(function(x,i){x.classList.toggle('on',i===d.sc);});
+  countEl.textContent=(b+1)+' / '+N;
+  sayS.textContent=d.say;
+  curB=b;
+}
+
+/* ---------- counterfactual ---------- */
+let D=1,auto=null,cfRan=false;
+function cfText(){cfline.innerHTML=D>0.5?'Rim damaged. The chain runs on to <em>Moderate</em>.':'Rim intact. The chain breaks at step 2, and the stage becomes <em>Early</em>.';}
+function setD(v){D=v;cf.value=Math.round(v*100);cfText();}
+cf.addEventListener('input',function(){auto=null;D=cf.value/100;cfText();});
+cfText();
+
+/* ---------- tags (labels projected from 3D) ---------- */
+const vv=function(x,y,dz){return new THREE.Vector3(x,y,bowl(x,y)+(dz||0));};
+const R_=function(x,y,dz){return function(){return vv(x,y,dz||0.02);};};
+const G_=function(x,y,dz){return function(){return GG.localToWorld(vv(x,y,dz||0.02));};};
+function nearest(px,py,f){let b=null,bd=1e9;NODES.forEach(function(n){if(f&&!f(n))return;const d=Math.hypot(n.x-px,n.y-py);if(d<bd){bd=d;b=n;}});return b;}
+const jn=nearest(-0.15,0.42,function(n){return n.deg>=3&&!n.hub;})||NODES[1];
+let mt=LINKS[1];LINKS.forEach(function(l){if(l.tort>mt.tort&&l.len>0.05)mt=l;});
+const mtp=mt.pts[Math.floor(mt.pts.length/2)];
+let md=NODES[1];NODES.forEach(function(n){if(!n.hub&&n.deg>md.deg)md=n;});
+let lk=LINKS[2],lkd=1e9;LINKS.forEach(function(l){const p=l.pts[Math.floor(l.pts.length/2)],d=Math.hypot(p.x+0.3,p.y-0.4);if(d<lkd&&l.len>0.04){lkd=d;lk=l;}});
+const lkp=lk.pts[Math.floor(lk.pts.length/2)];
+const pa=MAINS_A[0][3],pv=MAINS_V[1][3],pw=MAINS_A[0][1],pw2=MAINS_V[0][1];
+const ang=2.35,pr=[DISC.x+Math.cos(ang)*0.19,DISC.y+Math.sin(ang)*0.19];
+const LZ=function(i,dy){return function(){const g=W.lenses[i].g.position;return new THREE.Vector3(g.x,g.y+(dy===undefined?-0.86:dy),g.z);};};
+const GATE1=Math.max(0,CEDGES.findIndex(function(e){return e.layer===1;}));
+const TAGS=[
+ {b0:3,b1:3,t:'Optic disc',dir:'r',c:'#0E8F8A',fn:R_(DISC.x+DISC_R*0.75,DISC.y+DISC_R*0.65)},
+ {b0:3,b1:3,t:'Cup',dir:'l',c:'#0E8F8A',fn:R_(DISC.x-0.03,DISC.y-0.01,0.03)},
+ {b0:3,b1:3,t:'Inferior rim, thin',dir:'c',c:'#E5566B',fn:R_(DISC.x,DISC.y-DISC_R+0.012)},
+ {b0:4,b1:4,t:'Arteries',dir:'r',c:'#0E8F8A',fn:R_(pa[0],pa[1])},
+ {b0:4,b1:4,t:'Veins',dir:'r',c:'#0B5A73',fn:R_(pv[0],pv[1])},
+ {b0:5,b1:5,t:'Junction becomes a node',dir:'r',c:'#0F2340',fn:R_(jn.x,jn.y,0.03)},
+ {b0:5,b1:5,t:'Vessel becomes a link',dir:'l',c:'#0E8F8A',fn:R_(lkp.x,lkp.y)},
+ {b0:6,b1:6,t:'Calibre',dir:'r',c:'#0E8F8A',fn:R_(pw[0],pw[1])},
+ {b0:6,b1:6,t:'Artery–vein ratio',dir:'l',c:'#0B5A73',fn:R_(pw2[0],pw2[1])},
+ {b0:7,b1:7,t:'Most twisted segment',dir:'r',c:'#0F2340',fn:R_(mtp.x,mtp.y)},
+ {b0:8,b1:8,t:'Branch point',dir:'r',c:'#0F2340',fn:R_(md.x,md.y,0.03)},
+ {b0:9,b1:9,t:'Ring around the disc',dir:'l',c:'#0F2340',fn:R_(pr[0],pr[1])},
+ {b0:10,b1:10,wide:1,k:'Frozen',t:'The photograph and its segmentation were adapted beforehand.',dir:'r',c:'#7C8DA1',fn:function(){return vv(-0.5,-0.3,-0.42);}},
+ {b0:10,b1:10,wide:1,k:'Learns',t:'Only the graph network and the quantum layer are trained.',dir:'l',c:'#0E8F8A',fn:G_(0.2,0.3,0.05)},
+ {b0:11,b1:11,t:'Neighbours share what they know',dir:'r',c:'#0F2340',fn:G_(md.x,md.y,0.03)},
+ {b0:12,b1:12,t:'One number per region',dir:'l',c:'#E8780F',fn:function(){return GG.localToWorld(W.cp[3].clone());}},
+ {b0:13,b1:13,wide:1,k:'Qubit',t:'The number sets how far the arrow turns.',dir:'r',c:'#E8780F',fn:function(){return GG.localToWorld(W.cp[0].clone().add(new THREE.Vector3(0.08,0.06,0.05)));}},
+ {b0:14,b1:14,t:'Linked where vessels touch',dir:'r',c:'#E8780F',fn:function(){return GG.localToWorld(W.gates[0].position.clone());}},
+ {b0:14,b1:14,t:'Second trainable layer',dir:'l',c:'#0F2340',fn:function(){return GG.localToWorld(W.gates[GATE1].position.clone());}},
+ {b0:16,b1:16,t:'Error flows back',dir:'l',c:'#E5566B',fn:function(){return GG.localToWorld(W.cp[4].clone());}},
+ {b0:21,b1:21,wide:1,k:'Quantum learning',t:'Applied to eye images.',dir:'c',c:'#E8780F',fn:LZ(0)},
+ {b0:21,b1:21,wide:1,k:'Vessel analysis',t:'Measures calibre, twist and branching.',dir:'c',c:'#0E8F8A',fn:LZ(1)},
+ {b0:21,b1:21,wide:1,k:'Explainability',t:'Shows where a model looked.',dir:'c',c:'#E5566B',fn:LZ(2)},
+ {b0:21,b1:21,wide:1,k:'Function',t:'Estimates vision loss from structure.',dir:'c',c:'#6C5CE7',fn:LZ(3)},
+ {b0:22,b1:22,wide:1,k:'This research',t:'A circuit that follows the vessel graph.',dir:'c',c:'#E8780F',fn:LZ(0)},
+ {b0:22,b1:22,wide:1,k:'This research',t:'Vessels kept as a graph, not a flat image.',dir:'c',c:'#0E8F8A',fn:LZ(1)},
+ {b0:22,b1:22,wide:1,k:'This research',t:'A cause-and-effect pathway, with what-ifs.',dir:'c',c:'#E5566B',fn:LZ(2)},
+ {b0:22,b1:22,wide:1,k:'This research',t:'Structure used to predict vision loss.',dir:'c',c:'#6C5CE7',fn:LZ(3)}
+];
+TAGS.forEach(function(g){
+  const el=document.createElement('div');el.className='tag'+(g.wide?' wide':'');el.dataset.dir=g.dir;el.style.setProperty('--c',g.c);
+  el.innerHTML='<i></i><u></u><b>'+(g.k?'<em>'+g.k+'</em>':'')+g.t+'</b>';tagsEl.appendChild(el);g.el=el;
+});
+const tv=new THREE.Vector3();
+function updateTags(T){
+  TAGS.forEach(function(g){
+    const op=ss(g.b0-0.45,g.b0-0.1,T)*(1-ss(g.b1+0.1,g.b1+0.45,T));
+    if(op<0.01){if(g.on){g.el.style.opacity=0;g.on=false;}return;}
+    tv.copy(g.fn()).project(camera);
+    if(tv.z>1||tv.z<-1){g.el.style.opacity=0;return;}
+    g.on=true;
+    const wd=g.wide?260:170,sx=(tv.x*0.5+0.5)*VW;
+    if(g.dir==='r'&&sx>VW-wd)g.el.dataset.dir='l';else if(g.dir==='l'&&sx<wd)g.el.dataset.dir='r';else g.el.dataset.dir=g.dir;
+    g.el.style.opacity=op.toFixed(3);
+    g.el.style.transform='translate3d('+((tv.x*0.5+0.5)*VW).toFixed(1)+'px,'+((-tv.y*0.5+0.5)*VH).toFixed(1)+'px,0)';
+  });
+}
+
+/* ---------- camera ---------- */
+const cpos=new THREE.Vector3(),ctar=new THREE.Vector3();
+function updateCamera(T,time){
+  const i=Math.min(N-2,Math.max(0,Math.floor(T))),f=clamp(T-i,0,1),e=sm(f);
+  const A=CAMS[i],B=CAMS[i+1];
+  const L=function(k){return lerp(A[k],B[k],e);};
+  const bow=(i===17||i===20)?Math.sin(Math.PI*e):0;
+  cpos.set(L(0),L(1)+bow*1.5,L(2)+bow*1.8);ctar.set(L(3),L(4),L(5));
+  if(!REDUCE){cpos.x+=Math.sin(time*0.23)*0.025;cpos.y+=Math.cos(time*0.19)*0.02;}
+  const roll=bow*0.06*(i===17?1:-1);
+  let fov=L(6);
+  const ar=ASPECT,fac=Math.max(1,1.15/ar);
+  fov=2*Math.atan(Math.tan(fov*Math.PI/360)*fac)*180/Math.PI;
+  camera.fov=fov;camera.position.copy(cpos);camera.up.set(Math.sin(roll),Math.cos(roll),0);camera.lookAt(ctar);camera.updateProjectionMatrix();
+}
+
+/* ---------- scene state ---------- */
+const dummy=new THREE.Object3D(),colTmp=new THREE.Color();
+const NODE_BASE=NODES.map(function(n){return n.hub?0.018:(n.deg>=3?0.0105:0.0075);});
+(function(){NODES.forEach(function(n,i){colTmp.setHex(n.hub?COL.navy:(n.kind==='V'?0x0B5A73:COL.teal));W.nodes.setColorAt(i,colTmp);});W.nodes.instanceColor.needsUpdate=true;})();
+CEDGES.forEach(function(e,i){W.gates[i].material.color.setHex(e.layer?COL.navy:COL.orange);});
+W.qubits.forEach(function(q){q.pivot.rotation.order='YZX';q.pivot.rotation.y=q.ph*3;});
+W.arrows.forEach(function(a,i){a.h.position.x=(TILE_X[i]+TILE_X[i+1])/2+0.4;});
+const TILT=0.34;
+let flowDirBack=false;
+
+function updateScene(T,time){
+  const L=ss(9.7,10.7,T);
+  // retina
+  W.retMat.uniforms.uDim.value=0.85*ss(9.7,10.6,T);
+  W.retMat.uniforms.uScanOn.value=(1-ss(0.5,1.0,T))+win(1.5,1.9,2.4,2.8,T);
+  W.retMat.uniforms.uScan.value=-1.2+2.4*((time*0.28)%1);
+  W.ret.position.z=-0.5*L;W.rim.position.z=0.15-0.5*L;W.shadow.position.z=-0.25-0.5*L;
+  // graph group lift
+  GG.position.z=0.4*ss(9.6,10.6,T)+0.3*ss(12.2,13.0,T);
+  // links
+  const g=ss(11.3,11.95,T);
+  const lu=W.linkMat.uniforms;
+  lu.uDrawA.value=ss(3.5,4.0,T)*1.02;lu.uDrawV.value=ss(3.9,4.4,T)*1.02;
+  lu.uAlpha.value=(1-0.92*g)+0.3*g*ss(13.4,14.0,T)+0.25*win(15.3,15.8,16.3,16.8,T);
+  const bR=Math.round(T),modeMap={6:2,7:3,8:4,9:5};
+  const mode=modeMap[bR]||0,amt=mode?clamp(1-Math.abs(T-bR)*2.2,0,1):0;
+  lu.uMode.value=mode;lu.uModeAmt.value=amt;
+  // pulses on vessels
+  const fw=win(10.4,10.8,11.2,11.5,T), bk=win(15.5,15.8,16.4,16.8,T);
+  if(bk>0.01){lu.uPulseCol.value.setHex(COL.coral);lu.uP1.value=1-((time*0.6)%1);lu.uP2.value=1-((time*0.6+0.5)%1);}
+  else if(fw>0.01){lu.uPulseCol.value.setHex(COL.navy);lu.uP1.value=(time*0.5)%1;lu.uP2.value=(time*0.5+0.5)%1;}
+  else{lu.uP1.value=-2;lu.uP2.value=-2;}
+  // rings, rim, annulus
+  W.ringMat.uniforms.uDrawA.value=ss(2.4,3.0,T)*1.02;
+  W.ringMat.uniforms.uAlpha.value=1-0.85*ss(11.3,12.0,T);
+  W.rimFill.material.opacity=0.22*win(3.0,3.5,3.9,4.4,T);
+  W.annulus.material.opacity=0.16*win(8.6,9.0,9.8,10.3,T);
+  // nodes
+  const pu1=lu.uP1.value,pu2=lu.uP2.value,pulseOn=(bk>0.01||fw>0.01);
+  const vanish=1-ss(12.3,12.9,T), gT=ss(11.3,11.95,T)*1.6;
+  const m8=(mode===4)?amt:0;
+  const gp=W.gatherPos;
+  for(let i=0;i<NODES.length;i++){
+    const n=NODES[i];
+    const s=ss(0,1,clamp((T-4.6)*1.6-n.d*0.8,0,1));
+    const k=ss(0,1,clamp(gT-n.d*0.6,0,1));
+    const c=CEN[n.cl];
+    const x=lerp(n.x,c[0],k),y=lerp(n.y,c[1],k),z=lerp(bowl(n.x,n.y)+0.02,bowl(c[0],c[1])+0.045,k);
+    let sc=NODE_BASE[i]*s*vanish;
+    if(m8)sc*=1+(n.deg>=3?0.9:-0.3)*m8;
+    if(pulseOn){const p1=Math.exp(-Math.pow((n.d-pu1)*14,2))+Math.exp(-Math.pow((n.d-pu2)*14,2));sc*=1+0.8*Math.min(1,p1)*(fw+bk>0.5?1:0);}
+    dummy.position.set(x,y,z);dummy.scale.setScalar(Math.max(sc,0.00001));dummy.updateMatrix();W.nodes.setMatrixAt(i,dummy.matrix);
+    gp[i*6]=x;gp[i*6+1]=y;gp[i*6+2]=z;gp[i*6+3]=c[0];gp[i*6+4]=c[1];gp[i*6+5]=bowl(c[0],c[1])+0.045;
+  }
+  W.nodes.instanceMatrix.needsUpdate=true;
+  W.gather.geometry.attributes.position.needsUpdate=true;
+  W.gather.material.opacity=0.45*ss(11.25,11.6,T)*(1-ss(11.9,12.3,T));
+  // qubits
+  const qs=0.4*ss(11.6,12.0,T)+0.6*ss(12.6,13.0,T);
+  const tilt=ss(12.7,13.1,T),col=ss(14.6,15.0,T);
+  const prob=0.55*ss(13.6,14.0,T)*(1-ss(14.6,14.8,T));
+  const flash=win(14.6,14.85,14.85,15.3,T);
+  W.qubits.forEach(function(q,i){
+    q.g.scale.setScalar(Math.max(qs,0.001));
+    const wob=REDUCE?0:Math.sin(time*2+i)*0.05*tilt*(1-col);
+    q.pivot.rotation.z=lerp(q.th*tilt+wob,q.bit*Math.PI,col);
+    q.pivot.rotation.y=q.ph*3+(REDUCE?0:time*0.6*(1-col));
+    q.gr1.material.opacity=prob;q.gr2.material.opacity=prob;
+    q.gr1.rotation.z=time*0.8+i;q.gr2.rotation.z=-time*0.6+i;
+    q.fl.material.opacity=0.9*flash;q.fl.scale.setScalar(1+0.9*ss(14.7,15.3,T));
+    q.fl.lookAt(camera.position);
+    q.wire.material.opacity=0.45*(1-0.5*ss(15.2,15.6,T));
+  });
+  // circuit links, gates
+  const cu=W.cMat.uniforms;
+  cu.uDrawA.value=ss(13.4,14.0,T)*1.02;
+  cu.uAlpha.value=1-0.35*ss(17.0,17.6,T);
+  const cb=bk>0.01;
+  if(cb){cu.uPulseCol.value.setHex(COL.coral);cu.uP1.value=1-((time*0.6)%1);}
+  else if(T>14.1&&T<15.4){cu.uPulseCol.value.setHex(0xFFE2B8);cu.uP1.value=(time*0.8)%1;}
+  else cu.uP1.value=-2;
+  W.gates.forEach(function(gm,i){gm.scale.setScalar(Math.max(0.001,ss(13.7+i*0.02,14.1+i*0.02,T)));gm.rotation.y=time*1.2+i;});
+  // flow particles
+  const fo=0.9*win(13.9,14.2,16.8,17.1,T);
+  W.flow.material.opacity=fo;
+  if(fo>0.01){
+    W.flow.material.color.setHex(T>15.5?COL.coral:0xB8480A);
+    const dir=T>15.5?-1:1,fp=W.flowPos;let k=0;
+    for(let e=0;e<CEDGES.length;e++){
+      for(let j=0;j<5;j++){
+        let u=((time*0.35*dir+j/5+e*0.13)%1+1)%1;
+        const p=W.cCurves[e].getPoint(u);fp[k++]=p.x;fp[k++]=p.y;fp[k++]=p.z;
+      }
+    }
+    W.flow.geometry.attributes.position.needsUpdate=true;
+  }
+  // ----- causal tiles -----
+  const rise=ss(17.4,17.95,T);
+  const cc=[ss(18.2,18.55,T),ss(18.4,18.75,T),ss(18.6,18.95,T),ss(18.8,19.15,T)];
+  const gate=ss(0.3,0.7,D);
+  const tl=[cc[0],cc[1]*gate,cc[2]*gate,cc[3]*gate];
+  const dq=Math.round(D*10)/10;
+  W.tiles.forEach(function(tl_,i){
+    tl_.piv.visible=rise>0.01;tl_.piv.scale.setScalar(Math.max(rise,0.001));
+    tl_.piv.rotation.x=-tl[i]*TILT;
+    tl_.glow.visible=rise>0.01;tl_.glow.material.opacity=0.38*clamp(tl[i],0,1);
+  });
+  const fl=tl.map(function(v){return v>0.5?1:0;});
+  const key=fl.join('')+'|'+dq;
+  if(W.tileKeyAll!==key){
+    W.tileKeyAll=key;
+    for(let i=0;i<4;i++){drawTile(i,{f1:fl[0],f2:fl[1],f3:fl[2],f4:fl[3],d:dq});W.tiles[i].tx.needsUpdate=true;}
+  }
+  W.arrows.forEach(function(a,i){
+    const p=clamp(tl[i+1],0,1);a.m.scale.x=Math.max(0.001,0.8*p*rise);a.h.visible=p>0.95&&rise>0.9;
+  });
+  W.floor.visible=rise>0.01;W.floor.material.opacity=rise;
+  // ----- lenses -----
+  const conv=ss(22.4,23.0,T),spin=ss(21.4,22.0,T),ls=ss(20.3,20.9,T);
+  W.lenses.forEach(function(l,i){
+    const a=l.a,s=l.s,gg=l.g;
+    const bob=REDUCE?0:Math.sin(time*0.7+i*1.7)*0.05*(1-conv);
+    gg.position.set(lerp(s.x,a.x,conv),lerp(s.y,a.y,conv)+bob,lerp(s.z,a.z,conv));
+    gg.rotation.x=lerp(s.rx,0,conv)*0.6;gg.rotation.y=lerp(s.ry,0,conv)*0.6+spin*6.2832;
+    gg.scale.setScalar(Math.max(ls*0.8,0.001));gg.visible=ls>0.01;
+  });
+  W.beam.material.uniforms.uA.value=ss(22.7,23.4,T)*(1-0.35*ss(24.6,25,T));
+  W.beam.visible=W.beam.material.uniforms.uA.value>0.005;
+  W.focus.material.opacity=0.95*ss(23.4,24.0,T);
+  W.focus2.material.opacity=ss(23.5,24.1,T);
+  const pulse=1+(REDUCE?0:0.06*Math.sin(time*2.4));
+  W.focus.scale.setScalar(0.8*pulse);W.focus2.scale.setScalar(0.34*pulse);
+}
+
+/* ---------- loop ---------- */
+let last=performance.now(),time=0;
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;time+=dt;
+  if(forced!==null)Tt=forced;
+  if(REDUCE||forced!==null)T=Tt;else{T+=(Tt-T)*(1-Math.exp(-dt*5.5));if(Math.abs(Tt-T)<0.0008)T=Tt;}
+  const b=clamp(Math.round(T),0,N-1);
+  if(b!==curB)onBeat(b);
+  // counterfactual logic
+  if(T<19.4){if(cfRan||D!==1){cfRan=false;auto=null;setD(1);}}
+  else if(b===20&&!cfRan){cfRan=true;auto={t0:now,delay:800,dur:2600};}
+  if(auto){const u=clamp((now-auto.t0-auto.delay)/auto.dur,0,1);setD(1-sm(u));if(u>=1)auto=null;}
+  panelAmt+=((BEATS[b].panel&&b!==23?1:0)-panelAmt)*(1-Math.exp(-dt*4));if(Math.abs(panelAmt)<0.001)panelAmt=0;
+  applyOffset();
+  updateCamera(T,time);
+  updateScene(T,time);
+  scene.updateMatrixWorld(true);
+  updateTags(T);
+  railI.style.width=(T/(N-1)*100).toFixed(2)+'%';
+  const cross=win(17.15,17.5,17.5,17.85,T)+win(20.15,20.5,20.5,20.85,T);
+  vig.style.setProperty('--v',(lerp(55,150,ss(0,2.2,time))-60*clamp(cross,0,1)).toFixed(1)+'%');
+  renderer.render(scene,camera);
+  requestAnimationFrame(frame);
+}
+window.__setT=function(t){forced=t;Tt=t;T=t;};
+window.__state=function(){return {T:T,b:curB,D:D};};
+resize();readScroll();T=Tt;
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){W.tileKeyAll='';});
+requestAnimationFrame(frame);
+})();</script>
+
+</html>
